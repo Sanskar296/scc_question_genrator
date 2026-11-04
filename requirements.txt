@@ -1,0 +1,5 @@
+pymupdf>=1.24.0
+pydantic>=2.0
+easyocr
+# Optional for Gemini LLM extraction:
+google-genai>=0.1.0
