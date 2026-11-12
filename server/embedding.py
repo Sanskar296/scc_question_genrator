@@ -27,6 +27,11 @@ import types
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from dotenv import load_dotenv
+
+# Load local environment variables
+load_dotenv()
+
 # UTF-8 encoding safeguard for Windows consoles
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -35,8 +40,13 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 # =====================================================================
-# 1. ChromaDB Thin-Client Bootstrap Safeguard
+# 1. ChromaDB Cloud Credentials & Thin-Client Bootstrap Safeguard
 # =====================================================================
+
+DEFAULT_CHROMA_API_KEY = os.getenv("CHROMADB_API_KEY", "ck-8AARJhYU7tP9H7s4Q41UfCHebnR8td6NkapQMgcuCj6Y")
+DEFAULT_CHROMA_TENANT = os.getenv("CHROMADB_TENANT", "2d8eb3d4-29d6-4479-8c3b-3efc4ccd659c")
+DEFAULT_CHROMA_DATABASE = os.getenv("CHROMADB_DATABASE", "chsl_embeddings")
+
 # In environments where chromadb-client was co-installed with chromadb,
 # patch is_thin_client to False in sys.modules before importing chromadb.
 if "chromadb.is_thin_client" not in sys.modules:
@@ -68,16 +78,25 @@ def parse_exam_metadata_from_filename(filename: str) -> Tuple[str, str]:
 # 3. Dataset Loaders for Vector Embedding
 # =====================================================================
 
+def _resolve_data_path(primary: str | Path, alt_dir: str = "client/dist/assets") -> Path:
+    p = Path(primary)
+    if p.exists():
+        return p
+    alt = Path(alt_dir) / primary
+    if alt.exists():
+        return alt
+    return p
+
 def load_pyqs_for_embedding(
-    master_file: str | Path = "extracted_json/all_extracted_questions.json",
-    extracted_dir: str | Path = "extracted_json",
+    master_file: str | Path = "client/dist/assets/extracted_json/all_extracted_questions.json",
+    extracted_dir: str | Path = "client/dist/assets/extracted_json",
     limit: Optional[int] = None
 ) -> List[Dict[str, Any]]:
     """
     Loads PYQ questions from JSON and formats them for vector embedding.
     """
-    master_path = Path(master_file)
-    extracted_path = Path(extracted_dir)
+    master_path = _resolve_data_path(master_file)
+    extracted_path = _resolve_data_path(extracted_dir)
     items: List[Dict[str, Any]] = []
     seen_ids = set()
 
@@ -212,15 +231,15 @@ def load_pyqs_for_embedding(
 
 
 def load_lucent_for_embedding(
-    master_file: str | Path = "ocr_gk_extraction/lucent_gk_extracted.json",
-    ocr_dir: str | Path = "ocr_gk_extraction",
+    master_file: str | Path = "client/dist/assets/ocr_gk_extraction/lucent_gk_extracted.json",
+    ocr_dir: str | Path = "client/dist/assets/ocr_gk_extraction",
     limit: Optional[int] = None
 ) -> List[Dict[str, Any]]:
     """
     Loads Lucent GK page records and formats them for vector embedding.
     """
-    master_path = Path(master_file)
-    ocr_path = Path(ocr_dir)
+    master_path = _resolve_data_path(master_file)
+    ocr_path = _resolve_data_path(ocr_dir)
     items: List[Dict[str, Any]] = []
     seen_pages = set()
 
@@ -331,28 +350,61 @@ def load_lucent_for_embedding(
 
 
 # =====================================================================
-# 4. ChromaDB Client & Vector Indexer
+# 4. ChromaDB Client & Vector Indexer (Cloud & Local Support)
 # =====================================================================
 
 class VectorDBManager:
-    """Manages persistent ChromaDB collections, embeddings, and semantic queries."""
+    """
+    Manages ChromaDB collections, dense vector embeddings, and semantic queries.
+    Supports both ChromaDB CloudClient and local PersistentClient with auto-fallback.
+    """
 
-    def __init__(self, db_path: str | Path = "./chroma_db"):
+    def __init__(
+        self,
+        db_path: str | Path = "./chroma_db",
+        use_cloud: bool = True,
+        api_key: Optional[str] = None,
+        tenant: Optional[str] = None,
+        database: Optional[str] = None
+    ):
         self.db_path = Path(db_path).resolve()
-        self.db_path.mkdir(parents=True, exist_ok=True)
+        self.use_cloud = use_cloud
+        self.api_key = api_key or os.getenv("CHROMADB_API_KEY", DEFAULT_CHROMA_API_KEY)
+        self.tenant = tenant or os.getenv("CHROMADB_TENANT", DEFAULT_CHROMA_TENANT)
+        self.database = database or os.getenv("CHROMADB_DATABASE", DEFAULT_CHROMA_DATABASE)
 
-        print(f"[*] Initializing Persistent ChromaDB Client at: {self.db_path}")
-
-        # Local all-MiniLM-L6-v2 ONNX embedding function (384-dim, offline)
+        # Local all-MiniLM-L6-v2 ONNX embedding function (384-dim, dense representation)
         self.embedding_function = ef.DefaultEmbeddingFunction()
 
-        self.client = chromadb.PersistentClient(
-            path=str(self.db_path),
-            settings=Settings(
-                anonymized_telemetry=False,
-                allow_reset=True
+        # 1. Connect to ChromaDB CloudClient if requested
+        if self.use_cloud and self.api_key and self.tenant and self.database:
+            masked_key = f"{self.api_key[:6]}...{self.api_key[-4:]}" if len(self.api_key) > 10 else "***"
+            print(f"[*] Connecting to ChromaDB CloudClient:")
+            print(f"    Tenant:   {self.tenant}")
+            print(f"    Database: {self.database}")
+            print(f"    API Key:  {masked_key}")
+            try:
+                self.client = chromadb.CloudClient(
+                    api_key=self.api_key,
+                    tenant=self.tenant,
+                    database=self.database
+                )
+                print("[+] Successfully authenticated & connected to ChromaDB Cloud!")
+            except Exception as e:
+                print(f"[!] Warning: ChromaDB Cloud connection failed ({e}). Falling back to local PersistentClient.")
+                self.use_cloud = False
+
+        # 2. Local fallback or explicit local client
+        if not self.use_cloud:
+            self.db_path.mkdir(parents=True, exist_ok=True)
+            print(f"[*] Initializing Local Persistent ChromaDB Client at: {self.db_path}")
+            self.client = chromadb.PersistentClient(
+                path=str(self.db_path),
+                settings=Settings(
+                    anonymized_telemetry=False,
+                    allow_reset=True
+                )
             )
-        )
 
         # Initialize collections with cosine distance metric for normalized ranking
         self.coll_pyqs = self.client.get_or_create_collection(
@@ -373,23 +425,27 @@ class VectorDBManager:
             metadata={"hnsw:space": "cosine", "description": "Unified CHSL study material collection"}
         )
 
+        storage_target = f"Chroma Cloud ({self.database})" if self.use_cloud else f"Local ({self.db_path})"
+        print(f"[+] Active Vector Storage: {storage_target}")
         print(f"[+] Collections initialized: 'chsl_pyqs', 'lucent_gk', 'study_material'")
 
     def index_items_in_batches(
         self,
-        collection: chromadb.api.models.Collection.Collection,
+        collection: Any,
         items: List[Dict[str, Any]],
         batch_size: int = 100
     ) -> int:
         """
-        Generates vector embeddings and upserts documents in batches.
+        Generates vector embeddings and upserts documents in batches into ChromaDB Cloud or Local storage.
         Idempotent: updates existing vectors in-place if re-run.
+        Includes automatic retry for resilient cloud network uploads.
         """
         if not items:
             return 0
 
         total = len(items)
-        print(f"\n[*] Indexing {total:,} documents into '{collection.name}' in batches of {batch_size}...")
+        dest = f"Chroma Cloud ({self.database})" if self.use_cloud else "Local ChromaDB"
+        print(f"\n[*] Indexing {total:,} documents into '{collection.name}' on {dest} in batches of {batch_size}...")
 
         start_time = time.time()
         for i in range(0, total, batch_size):
@@ -399,20 +455,32 @@ class VectorDBManager:
             b_metas = [item["metadata"] for item in batch]
 
             t_batch_start = time.time()
-            collection.upsert(
-                ids=b_ids,
-                documents=b_docs,
-                metadatas=b_metas
-            )
-            elapsed_batch = time.time() - t_batch_start
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    collection.upsert(
+                        ids=b_ids,
+                        documents=b_docs,
+                        metadatas=b_metas
+                    )
+                    break
+                except Exception as err:
+                    if attempt < max_retries - 1:
+                        backoff = 2 * (attempt + 1)
+                        print(f"\n[!] Network glitch on batch ({i}-{i+len(batch)}), retrying in {backoff}s: {err}")
+                        time.sleep(backoff)
+                    else:
+                        print(f"\n[X] Failed batch after {max_retries} attempts: {err}")
+                        raise err
 
+            elapsed_batch = time.time() - t_batch_start
             current = min(i + batch_size, total)
             rate = len(batch) / elapsed_batch if elapsed_batch > 0 else 0
-            sys.stdout.write(f"\r  [{current:,}/{total:,}] embedded (Batch: {elapsed_batch:4.2f}s | ~{rate:4.1f} docs/s)")
+            sys.stdout.write(f"\r  [{current:,}/{total:,}] embedded & stored (Batch: {elapsed_batch:4.2f}s | ~{rate:4.1f} docs/s)")
             sys.stdout.flush()
 
         total_elapsed = time.time() - start_time
-        print(f"\n[+] Successfully indexed {total:,} items into '{collection.name}' in {total_elapsed:.1f}s.")
+        print(f"\n[+] Successfully indexed {total:,} items into '{collection.name}' on {dest} in {total_elapsed:.1f}s.")
         return total
 
     def query(
@@ -448,6 +516,10 @@ class VectorDBManager:
 
 def run_indexing(
     db_path: str = "./chroma_db",
+    use_cloud: bool = True,
+    api_key: Optional[str] = None,
+    tenant: Optional[str] = None,
+    database: Optional[str] = None,
     batch_size: int = 100,
     limit_pyqs: Optional[int] = None,
     limit_lucent: Optional[int] = None,
@@ -457,10 +529,16 @@ def run_indexing(
     Loads both datasets and executes complete Chroma vector indexing pipeline.
     """
     print("=" * 75)
-    print("ChromaDB Vector Embeddings & Ingestion Engine")
+    print("ChromaDB Vector Embeddings & Ingestion Engine (Cloud & Local)")
     print("=" * 75)
 
-    vdb = VectorDBManager(db_path=db_path)
+    vdb = VectorDBManager(
+        db_path=db_path,
+        use_cloud=use_cloud,
+        api_key=api_key,
+        tenant=tenant,
+        database=database
+    )
 
     # 1. Load data
     pyq_items = load_pyqs_for_embedding(limit=limit_pyqs)
@@ -486,10 +564,11 @@ def run_indexing(
         vdb.index_items_in_batches(vdb.coll_unified, combined_items, batch_size=batch_size)
 
     # Print summary statistics
+    target_info = f"ChromaDB Cloud (Tenant: {vdb.tenant} | Database: {vdb.database})" if vdb.use_cloud else f"Local Directory: {vdb.db_path.resolve()}"
     print("\n" + "=" * 75)
     print("CHROMADB VECTOR INDEXING SUMMARY")
     print("=" * 75)
-    print(f"Database Directory: {vdb.db_path.resolve()}")
+    print(f"Target Storage: {target_info}")
     print(f"  - Collection 'chsl_pyqs'      : {vdb.coll_pyqs.count():>7,} vectors")
     print(f"  - Collection 'lucent_gk'      : {vdb.coll_lucent.count():>7,} vectors")
     print(f"  - Collection 'study_material' : {vdb.coll_unified.count():>7,} vectors")
@@ -501,13 +580,24 @@ def run_query(
     collection_name: str = "chsl_pyqs",
     n_results: int = 5,
     db_path: str = "./chroma_db",
+    use_cloud: bool = True,
+    api_key: Optional[str] = None,
+    tenant: Optional[str] = None,
+    database: Optional[str] = None,
     filter_topic: Optional[str] = None,
     filter_shift: Optional[str] = None
 ):
     """
-    Executes a vector search query and prints formatted results.
+    Executes a vector search query against Cloud or Local ChromaDB and prints formatted results.
     """
-    vdb = VectorDBManager(db_path=db_path)
+    vdb = VectorDBManager(
+        db_path=db_path,
+        use_cloud=use_cloud,
+        api_key=api_key,
+        tenant=tenant,
+        database=database
+    )
+
     where_filter = {}
     if filter_topic:
         where_filter["topic"] = filter_topic
@@ -516,7 +606,8 @@ def run_query(
     if not where_filter:
         where_filter = None
 
-    print(f"\n[*] Searching '{collection_name}' for query: \"{query_text}\" (n={n_results})")
+    target = "ChromaDB Cloud" if vdb.use_cloud else "Local ChromaDB"
+    print(f"\n[*] Searching '{collection_name}' on {target} for: \"{query_text}\" (n={n_results})")
     if where_filter:
         print(f"[*] Applied Metadata Filter: {where_filter}")
 
@@ -533,7 +624,7 @@ def run_query(
     distances = results.get("distances", [[]])[0]
 
     print("\n" + "=" * 75)
-    print(f"TOP {len(ids)} SEMANTIC SEARCH RESULTS")
+    print(f"TOP {len(ids)} SEMANTIC SEARCH RESULTS ({target})")
     print("=" * 75)
 
     for idx, (doc_id, doc, meta) in enumerate(zip(ids, docs, metas), 1):
@@ -557,19 +648,50 @@ def run_query(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="ChromaDB vector embedding generator and semantic search indexer for SSC CHSL study materials."
+        description="ChromaDB vector embedding generator and semantic search indexer for SSC CHSL study materials (Cloud & Local)."
+    )
+    parser.add_argument(
+        "--cloud",
+        dest="use_cloud",
+        action="store_true",
+        default=True,
+        help="Store vectors in ChromaDB Cloud (default: True)"
+    )
+    parser.add_argument(
+        "--local",
+        dest="use_cloud",
+        action="store_false",
+        help="Store vectors in local ChromaDB PersistentClient"
+    )
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        default=None,
+        help="ChromaDB Cloud API key (default: from .env or DEFAULT_CHROMA_API_KEY)"
+    )
+    parser.add_argument(
+        "--tenant",
+        type=str,
+        default=None,
+        help="ChromaDB Cloud tenant ID (default: from .env or DEFAULT_CHROMA_TENANT)"
+    )
+    parser.add_argument(
+        "--database",
+        type=str,
+        default=None,
+        help="ChromaDB Cloud database name (default: from .env or DEFAULT_CHROMA_DATABASE)"
     )
     parser.add_argument(
         "--db-path",
         type=str,
         default="./chroma_db",
-        help="Local directory to store persistent ChromaDB data (default: './chroma_db')"
+        help="Local directory to store persistent ChromaDB data when in local mode (default: './chroma_db')"
     )
     parser.add_argument(
         "--batch-size",
         type=int,
         default=100,
-        help="Batch size for generating embeddings (default: 100)"
+        help="Batch size for generating embeddings & uploads (default: 100)"
     )
     parser.add_argument(
         "--limit-pyqs",
@@ -623,12 +745,20 @@ def main():
             collection_name=args.collection,
             n_results=args.n_results,
             db_path=args.db_path,
+            use_cloud=args.use_cloud,
+            api_key=args.api_key,
+            tenant=args.tenant,
+            database=args.database,
             filter_topic=args.filter_topic,
             filter_shift=args.filter_shift
         )
     else:
         run_indexing(
             db_path=args.db_path,
+            use_cloud=args.use_cloud,
+            api_key=args.api_key,
+            tenant=args.tenant,
+            database=args.database,
             batch_size=args.batch_size,
             limit_pyqs=args.limit_pyqs,
             limit_lucent=args.limit_lucent
@@ -637,4 +767,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

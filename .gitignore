@@ -1,7 +1,8 @@
-__pycache__/
+server/__pycache__/
 .env
+.env/
 .easyocr/
-chroma_db/
 client/node_modules/
-chsl_pyqs/
-books/
+chroma_db/
+
+

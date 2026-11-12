@@ -510,6 +510,16 @@ def extract_headings_from_ocr(
 # 5. Lucent GK Page Extractor
 # ==========================================
 
+def _resolve_output_dir(default_name: str = "ocr_gk_extraction") -> Path:
+    candidates = [
+        Path("client/dist/assets") / default_name,
+        Path(default_name)
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    return Path(default_name)
+
 class LucentGKExtractor:
     """
     Handles page-by-page OCR extraction and topic matching for the Lucent GK book.
@@ -518,12 +528,12 @@ class LucentGKExtractor:
     def __init__(
         self,
         pdf_path: str | Path,
-        output_dir: str | Path = "ocr_gk_extraction",
+        output_dir: str | Path | None = None,
         topic_file: str | Path = "topic.txt",
         dpi: int = 100
     ):
         self.pdf_path = Path(pdf_path)
-        self.output_dir = Path(output_dir)
+        self.output_dir = Path(output_dir) if output_dir is not None else _resolve_output_dir("ocr_gk_extraction")
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.dpi = dpi
 
@@ -834,8 +844,8 @@ def main():
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="ocr_gk_extraction",
-        help="Output directory to save page-by-page JSON files (default: 'ocr_gk_extraction')"
+        default=str(_resolve_output_dir("ocr_gk_extraction")),
+        help="Output directory to save page-by-page JSON files (default: auto-resolved)"
     )
     parser.add_argument(
         "--topic-file",

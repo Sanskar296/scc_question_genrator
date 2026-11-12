@@ -3,10 +3,11 @@ import Navbar from './components/Navbar';
 import SectionsBanner from './components/SectionsBanner';
 import PYQSearch from './components/PYQSearch';
 import LucentQuestionGen from './components/LucentQuestionGen';
+import ReviseProgress from './components/ReviseProgress';
 import AuthModal from './components/AuthModal';
 import UserProfileModal from './components/UserProfileModal';
 import { api, getStoredToken } from './api';
-import { Layers, BookOpen } from 'lucide-react';
+import { Layers, BookOpen, RotateCcw } from 'lucide-react';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -14,6 +15,18 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('pyqs');
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem('study_theme') || 'dark';
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('study_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+  };
 
   useEffect(() => {
     fetchInitialData();
@@ -46,7 +59,7 @@ export default function App() {
       client_ip: authData.client_ip,
       email: authData.email,
       full_name: authData.full_name || authData.username,
-      target_exam: authData.target_exam || 'SSC CHSL 2024 Tier I',
+      target_exam: authData.target_exam || 'SSC CHSL 2026 Dec',
       analytics: {
         total_questions_attempted: 0,
         total_correct: 0,
@@ -79,6 +92,8 @@ export default function App() {
         onOpenAuth={() => setIsAuthOpen(true)}
         onOpenProfile={() => setIsProfileOpen(true)}
         onLogout={handleLogout}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
 
       <main className="container" style={{ flex: 1, padding: '2rem 1.5rem' }}>
@@ -93,7 +108,7 @@ export default function App() {
               className={`tab-btn ${activeTab === 'pyqs' ? 'active' : ''}`}
             >
               <Layers size={14} />
-              <span>ChromaDB Semantic PYQs</span>
+              <span>All PYQs</span>
               <span className="badge badge-outline" style={{ fontSize: '0.62rem' }}>12,968 Qs</span>
             </button>
             <button
@@ -101,37 +116,49 @@ export default function App() {
               className={`tab-btn ${activeTab === 'lucent' ? 'active' : ''}`}
             >
               <BookOpen size={14} />
-              <span>Lucent GK Question Generator</span>
+              <span>NEW Question Generator from Lucent</span>
               <span className="badge badge-outline" style={{ fontSize: '0.62rem' }}>672 Pages</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('revise')}
+              className={`tab-btn ${activeTab === 'revise' ? 'active' : ''}`}
+            >
+              <RotateCcw size={14} />
+              <span>Revise Your Progress</span>
             </button>
           </div>
 
           {!user && (
-            <div style={{ fontSize: '0.75rem', color: '#888888', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span>• Tip:</span>
               <button
                 onClick={() => setIsAuthOpen(true)}
-                style={{ background: 'none', border: 'none', color: '#ffffff', textDecoration: 'underline', cursor: 'pointer', fontWeight: 600 }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-main)', textDecoration: 'underline', cursor: 'pointer', fontWeight: 600 }}
               >
                 Sign In
               </button>
-              <span>to store your test attempts in MongoDB Atlas.</span>
+              <span>to save your test attempts and Scores in your Account.</span>
             </div>
           )}
         </div>
 
         {/* Active Tool View */}
-        {activeTab === 'pyqs' ? (
+        {activeTab === 'pyqs' && (
           <PYQSearch user={user} onAttemptRecorded={refreshUserProfile} />
-        ) : (
+        )}
+        {activeTab === 'lucent' && (
           <LucentQuestionGen user={user} onAttemptRecorded={refreshUserProfile} />
+        )}
+        {activeTab === 'revise' && (
+          <ReviseProgress user={user} onAttemptRecorded={refreshUserProfile} />
         )}
       </main>
 
-      <footer style={{ borderTop: '1px solid #1a1a1a', background: '#000000', padding: '1.25rem 0', fontSize: '0.72rem', color: '#555555' }}>
+      <footer style={{ borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-main)', padding: '1.25rem 0', fontSize: '0.72rem', color: 'var(--text-muted)', transition: 'background-color 0.2s ease, border-color 0.2s ease' }}>
         <div className="container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-          <div>Antigravity Study Assistant • Connected to MongoDB Atlas & ChromaDB</div>
-          <div>Focus: Lucent GK Book (English 2026) + Verified CHSL PYQs</div>
+          <div>Study Assistant </div>
+
+          <div>Focus: General Awareness + English + Verified CHSL PYQs</div>
         </div>
       </footer>
 

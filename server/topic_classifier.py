@@ -441,9 +441,19 @@ class BalancedTopicClassifier:
 # 5. Pipeline Execution & JSON Dataset Enrichment
 # ==============================================================
 
+def _resolve_data_path(primary: str | Path, alt_dir: str = "client/dist/assets") -> Path:
+    p = Path(primary)
+    if p.exists():
+        return p
+    alt = Path(alt_dir) / primary
+    if alt.exists():
+        return alt
+    return p
+
+
 def analyze_and_enrich_dataset(
-    json_path: str | Path = "extracted_json/all_extracted_questions.json",
-    individual_dir: str | Path = "extracted_json",
+    json_path: str | Path = "client/dist/assets/extracted_json/all_extracted_questions.json",
+    individual_dir: str | Path = "client/dist/assets/extracted_json",
     topic_file: str | Path = "topic.txt",
     use_smote: bool = True,
     target_min: int = 15,
@@ -455,7 +465,7 @@ def analyze_and_enrich_dataset(
     """
     topic_map, subtopic_to_subject = load_topic_hierarchy(topic_file)
 
-    master_path = Path(json_path)
+    master_path = _resolve_data_path(json_path)
     if not master_path.exists():
         raise FileNotFoundError(f"Dataset JSON file not found: {master_path.resolve()}")
 
@@ -600,16 +610,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Classify exam questions using SMOTE and LinearSVC with balanced loss weights."
     )
+    default_json = str(_resolve_data_path("client/dist/assets/extracted_json/all_extracted_questions.json"))
+    default_dir = str(_resolve_data_path("client/dist/assets/extracted_json"))
+
     parser.add_argument(
         "--dataset",
         type=str,
-        default="extracted_json/all_extracted_questions.json",
+        default=default_json,
         help="Path to all_extracted_questions.json"
     )
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="extracted_json",
+        default=default_dir,
         help="Directory containing individual JSON files to update"
     )
     parser.add_argument(

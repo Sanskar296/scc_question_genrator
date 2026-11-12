@@ -196,16 +196,26 @@ def parse_exam_metadata_from_filename(filename: str) -> Tuple[Optional[str], Opt
     return date_str, shift_str
 
 
+def _resolve_data_path(primary: str | Path, alt_dir: str = "client/dist/assets") -> Path:
+    p = Path(primary)
+    if p.exists():
+        return p
+    alt = Path(alt_dir) / primary
+    if alt.exists():
+        return alt
+    return p
+
+
 def load_pyqs_data(
-    extracted_json_dir: str | Path = "extracted_json",
-    master_file: str | Path = "extracted_json/all_extracted_questions.json"
+    extracted_json_dir: str | Path = "client/dist/assets/extracted_json",
+    master_file: str | Path = "client/dist/assets/extracted_json/all_extracted_questions.json"
 ) -> List[Dict[str, Any]]:
     """
     Loads all extracted questions from master JSON and/or individual question paper JSONs.
     Returns normalized documents with metadata.
     """
-    master_path = Path(master_file)
-    extracted_dir = Path(extracted_json_dir)
+    master_path = _resolve_data_path(master_file)
+    extracted_dir = _resolve_data_path(extracted_json_dir)
     documents: List[Dict[str, Any]] = []
     seen_ids = set()
 
@@ -294,14 +304,14 @@ def load_pyqs_data(
 
 
 def load_lucent_data(
-    ocr_dir: str | Path = "ocr_gk_extraction",
-    master_file: str | Path = "ocr_gk_extraction/lucent_gk_extracted.json"
+    ocr_dir: str | Path = "client/dist/assets/ocr_gk_extraction",
+    master_file: str | Path = "client/dist/assets/ocr_gk_extraction/lucent_gk_extracted.json"
 ) -> List[Dict[str, Any]]:
     """
     Loads all Lucent GK extracted pages from consolidated master file and/or page_*.json files.
     """
-    master_path = Path(master_file)
-    ocr_path = Path(ocr_dir)
+    master_path = _resolve_data_path(master_file)
+    ocr_path = _resolve_data_path(ocr_dir)
     documents: List[Dict[str, Any]] = []
     seen_pages = set()
 

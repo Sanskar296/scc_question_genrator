@@ -1,7 +1,7 @@
 import React from 'react';
-import { BookOpen, LogIn, LogOut, User } from 'lucide-react';
+import { BookOpen, LogIn, LogOut, User, Sun, Moon } from 'lucide-react';
 
-export default function Navbar({ user, onOpenAuth, onOpenProfile, onLogout }) {
+export default function Navbar({ user, onOpenAuth, onOpenProfile, onLogout, theme, onToggleTheme }) {
   return (
     <header className="header">
       <div className="container header-inner">
@@ -12,7 +12,7 @@ export default function Navbar({ user, onOpenAuth, onOpenProfile, onLogout }) {
           </div>
           <div>
             <div className="brand-title">
-              <span>Antigravity</span>
+              <span>Daily Pratice</span>
               <span className="badge badge-outline">SSC CHSL</span>
             </div>
             <div className="brand-subtitle">Intelligent Study & Question Retrieval</div>
@@ -26,8 +26,18 @@ export default function Navbar({ user, onOpenAuth, onOpenProfile, onLogout }) {
           <strong>General Awareness (Lucent GK + PYQs)</strong>
         </div>
 
-        {/* User Account Controls */}
-        <div>
+        {/* User Account & Theme Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          {/* Black & White Theme Toggle */}
+          <button
+            onClick={onToggleTheme}
+            className="theme-toggle-btn"
+            title={`Switch to ${theme === 'dark' ? 'Clean White' : 'Dark Black'} UI`}
+            aria-label="Toggle Black/White Theme"
+          >
+            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+
           {user ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <button onClick={onOpenProfile} className="btn btn-secondary btn-sm">

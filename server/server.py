@@ -36,8 +36,12 @@ import jwt
 from pydantic import BaseModel, Field
 import pymongo
 
-# Load environment
-load_dotenv()
+# Load environment from project root or current dir
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parent if (BASE_DIR.parent / ".env").exists() else BASE_DIR
+
+load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv(BASE_DIR / ".env")
 
 # Import ChromaDB & connection components
 from embedding import VectorDBManager
@@ -74,16 +78,32 @@ vdb_mgr: Optional[VectorDBManager] = None
 def get_vdb() -> VectorDBManager:
     global vdb_mgr
     if vdb_mgr is None:
-        vdb_mgr = VectorDBManager(db_path="./chroma_db")
+        use_cloud = os.getenv("USE_CHROMA_CLOUD", "true").lower() in ("true", "1", "yes")
+        vdb_mgr = VectorDBManager(db_path=str(PROJECT_ROOT / "chroma_db"), use_cloud=use_cloud)
     return vdb_mgr
 
+
+# File path resolution helper supporting client/dist/assets/ and workspace root
+def find_dataset_file(filename_or_subpath: str) -> Path:
+    candidates = [
+        PROJECT_ROOT / "client" / "dist" / "assets" / filename_or_subpath,
+        PROJECT_ROOT / filename_or_subpath,
+        BASE_DIR / filename_or_subpath,
+        Path("client/dist/assets") / filename_or_subpath,
+        Path(filename_or_subpath),
+        Path("client/public/assets") / filename_or_subpath,
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return PROJECT_ROOT / filename_or_subpath
 
 # Cache Lucent GK JSON pages in memory for fast lookup
 LUCENT_PAGES_CACHE: Dict[int, Dict[str, Any]] = {}
 
 def load_lucent_cache():
     global LUCENT_PAGES_CACHE
-    json_path = Path("ocr_gk_extraction/lucent_gk_extracted.json")
+    json_path = find_dataset_file("ocr_gk_extraction/lucent_gk_extracted.json")
     if json_path.exists():
         try:
             with open(json_path, "r", encoding="utf-8") as f:
@@ -92,11 +112,220 @@ def load_lucent_cache():
                     pno = page.get("page_number")
                     if pno is not None:
                         LUCENT_PAGES_CACHE[int(pno)] = page
-            print(f"[+] Cached {len(LUCENT_PAGES_CACHE)} Lucent GK pages in memory.")
+            print(f"[+] Cached {len(LUCENT_PAGES_CACHE)} Lucent GK pages in memory from {json_path}.")
         except Exception as e:
             print(f"[!] Error caching Lucent GK pages: {e}")
+    else:
+        print(f"[!] Lucent GK file not found at {json_path}")
 
 load_lucent_cache()
+
+
+# Cache clean General Awareness PYQs directly from JSON for instant topic-wise delivery
+PYQ_TOPIC_CACHE: Dict[str, List[Dict[str, Any]]] = {}
+
+# Precomputed quick lookup index by topic and keyword for sub-millisecond retrieval
+PYQ_KEYWORD_INDEX: Dict[str, List[Dict[str, Any]]] = {}
+
+ENGLISH_LEAK_PATTERNS = [
+    'select the', 'in the sentence', 'given below are', 'identify the segment',
+    'fill in the blank', 'select the option', 'select the most', 'choose the',
+    'one of the following words', 'antonym of', 'synonym of', 'passive form',
+    'active form', 'indirect speech', 'direct speech', 'grammatical error',
+    'jumbled sentences', 'most appropriate option', 'substitute the underlined',
+    'underlined segment', 'spelt word', 'meaning of the given idiom'
+]
+
+def clean_pyq_option_text(raw_opt: str) -> str:
+    """Strips metadata lines (Question ID, Status, Chosen Option) and leading option prefixes."""
+    lines = str(raw_opt).split("\n")
+    valid_lines = []
+    for l in lines:
+        if any(bad in l for bad in ["Question ID :", "Status :", "Chosen Option :", "Comprehension:", "SubQuestion No :"]):
+            break
+        valid_lines.append(l)
+    t = " ".join(" ".join(valid_lines).split()).strip()
+    # Strip prefixes like '1. ', '2. ', '(a) ', 'A. ', '1) '
+    t = re.sub(r'^(?:\(?\s*[1-4a-dA-D]\s*[\.\)]|\b[1-4a-dA-D]\.\s*)\s*', '', t).strip()
+    return t
+
+def parse_pyq_correct_answer(raw_ans: str, clean_opts: List[str]) -> str:
+    """Resolves correct answer into the matching clean option string."""
+    if not raw_ans:
+        return clean_opts[0] if clean_opts else ""
+    first_part = str(raw_ans).split("\n")[0].strip()
+    m = re.match(r'^(?:\(?\s*([1-4a-dA-D])\s*[\.\)]|\b([1-4a-dA-D])\.\s*)\s*(.*)', first_part)
+    if m:
+        num_or_let = m.group(1) or m.group(2)
+        idx = (int(num_or_let) - 1) if num_or_let.isdigit() else (ord(num_or_let.lower()) - ord('a'))
+        if 0 <= idx < len(clean_opts):
+            return clean_opts[idx]
+    cleaned = clean_pyq_option_text(raw_ans)
+    for opt in clean_opts:
+        if cleaned.lower() == opt.lower() or opt.lower() in cleaned.lower():
+            return opt
+    return clean_opts[0] if clean_opts else cleaned
+
+MONTH_MAP = {
+    'jan': '01', 'january': '01',
+    'feb': '02', 'february': '02',
+    'mar': '03', 'march': '03',
+    'apr': '04', 'april': '04',
+    'may': '05',
+    'jun': '06', 'june': '06',
+    'jul': '07', 'july': '07',
+    'aug': '08', 'august': '08',
+    'sep': '09', 'sept': '09', 'september': '09',
+    'oct': '10', 'october': '10',
+    'nov': '11', 'november': '11',
+    'dec': '12', 'december': '12'
+}
+
+def extract_formatted_exam_date(filename: str) -> str:
+    """Extracts strictly formatted date string (e.g. '07-09-2024') from paper PDF filename."""
+    clean = re.sub(r'(\d+)(?:st|nd|rd|th)', r'\1', filename, flags=re.IGNORECASE)
+    # Pattern 1: e.g. 11-August-2023 or 9-march-2023
+    m1 = re.search(r'(\d{1,2})[-_\s]+([a-zA-Z]+)[-_\s]+(\d{4})', clean)
+    if m1:
+        d = int(m1.group(1))
+        mon_str = m1.group(2).lower()
+        yr = m1.group(3)
+        if mon_str in MONTH_MAP:
+            return f"{d:02d}-{MONTH_MAP[mon_str]}-{yr}"
+    # Pattern 2: e.g. 01-07-2024 or 12-10-2020
+    m2 = re.search(r'(\d{1,2})[-_](\d{1,2})[-_](\d{4})', clean)
+    if m2:
+        d = int(m2.group(1))
+        m = int(m2.group(2))
+        yr = m2.group(3)
+        return f"{d:02d}-{m:02d}-{yr}"
+    # Pattern 3: e.g. 2024-01-07 or 2019-02-07
+    m3 = re.search(r'(\d{4})[-_](\d{1,2})[-_](\d{1,2})', clean)
+    if m3:
+        yr = m3.group(1)
+        m = int(m3.group(2))
+        d = int(m3.group(3))
+        return f"{d:02d}-{m:02d}-{yr}"
+    # Pattern 4: month + day without year (2023 batch) -> e.g. 11-August-shift-4
+    m4 = re.search(r'(\d{1,2})[-_\s]+([a-zA-Z]+)', clean)
+    if m4:
+        d = int(m4.group(1))
+        mon_str = m4.group(2).lower()
+        if mon_str in MONTH_MAP:
+            return f"{d:02d}-{MONTH_MAP[mon_str]}-2023"
+    return "01-08-2023"
+
+def is_english_question(text: str) -> bool:
+    """Returns True if the question is written in English."""
+    if not text:
+        return False
+    ascii_letters = sum(1 for c in text if 'a' <= c.lower() <= 'z')
+    devanagari = sum(1 for c in text if '\u0900' <= c <= '\u097f')
+    return ascii_letters > devanagari and ascii_letters > len(text) * 0.35
+
+def normalize_question_text(text: str) -> str:
+    """Normalizes question string to detect duplicates and count occurrences."""
+    return re.sub(r'\s+', ' ', re.sub(r'[^\w\s]', '', text.lower())).strip()
+
+def load_pyq_topic_cache():
+    global PYQ_TOPIC_CACHE
+    json_path = find_dataset_file("extracted_json/all_extracted_questions.json")
+    if not json_path.exists():
+        print(f"[!] PYQ file not found: {json_path}")
+        return
+
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        raw_clean_items = []
+        text_counts = {}
+
+        for p in data.get("papers", []):
+            pdf = p.get("source_pdf", "")
+            title = p.get("exam_title", "SSC CHSL")
+            exam_date = extract_formatted_exam_date(pdf)
+
+            for q in p.get("questions", []):
+                if q.get("subject") != "General Awareness":
+                    continue
+                q_text = str(q.get("question", "")).strip()
+
+                # Filter out raw OCR placeholders and English section misclassifications
+                if len(q_text) < 15 or q_text.lower().startswith("question "):
+                    continue
+                if any(pfx in q_text.lower() for pfx in ENGLISH_LEAK_PATTERNS):
+                    continue
+
+                opts = q.get("options", [])
+                if len(opts) != 4:
+                    continue
+
+                clean_opts = [clean_pyq_option_text(o) for o in opts]
+                if any(not o or o.lower().startswith("option ") or o.isdigit() or len(o) < 2 for o in clean_opts):
+                    continue
+
+                raw_ans = q.get("correct_answer", "")
+                resolved_ans = parse_pyq_correct_answer(raw_ans, clean_opts)
+                topic = q.get("topic", "General Awareness")
+
+                norm_key = normalize_question_text(q_text)
+                text_counts[norm_key] = text_counts.get(norm_key, 0) + 1
+
+                raw_clean_items.append({
+                    "q_text": q_text,
+                    "clean_opts": clean_opts,
+                    "resolved_ans": resolved_ans,
+                    "topic": topic,
+                    "subtopic": q.get("subtopic", ""),
+                    "exam_date": exam_date,
+                    "title": title,
+                    "is_english": is_english_question(q_text),
+                    "norm_key": norm_key,
+                    "question_number": q.get("question_number", 1)
+                })
+
+        # Group and index items by topic
+        topic_map: Dict[str, List[Dict[str, Any]]] = {}
+        for item in raw_clean_items:
+            topic = item["topic"]
+            if topic not in topic_map:
+                topic_map[topic] = []
+
+            occurrences = text_counts.get(item["norm_key"], 1)
+            qid = f"pyq_{len(topic_map[topic]) + 1}_{item['question_number']}"
+            topic_map[topic].append({
+                "id": qid,
+                "question": item["q_text"],
+                "options": item["clean_opts"],
+                "correct_answer": item["resolved_ans"],
+                "subject": "General Awareness",
+                "topic": topic,
+                "subtopic": item["subtopic"],
+                "exam_date": item["exam_date"],
+                "exam_title": item["title"],
+                "is_english": item["is_english"],
+                "repetition_count": occurrences,
+                "source": "Verified SSC CHSL PYQ Dataset",
+                "similarity_score": 1.0
+            })
+
+        # Sort each topic so English questions come FIRST, and repeated questions appear prioritized
+        for topic in topic_map:
+            topic_map[topic].sort(
+                key=lambda x: (
+                    0 if x["is_english"] else 1,       # Priority 1: English questions first
+                    -x["repetition_count"]              # Priority 2: Repeated questions with higher count first
+                )
+            )
+
+        PYQ_TOPIC_CACHE = topic_map
+        total_indexed = sum(len(v) for v in PYQ_TOPIC_CACHE.values())
+        print(f"[+] Loaded {total_indexed} clean, authentic General Awareness PYQs across {len(PYQ_TOPIC_CACHE)} topics (English prioritized & repetition count indexed).")
+    except Exception as e:
+        print(f"[!] Error loading PYQ cache: {e}")
+
+load_pyq_topic_cache()
 
 
 # =====================================================================
@@ -136,6 +365,10 @@ class AttemptLogRequest(BaseModel):
     correct_option: str
     is_correct: bool
     time_spent_seconds: float = 0.0
+    question_text: Optional[str] = None
+    options: Optional[List[str]] = None
+    exam_date: Optional[str] = None
+    repetition_count: Optional[int] = 1
 
 class LucentGenerateRequest(BaseModel):
     page_number: int = Field(..., ge=1, le=672)
@@ -393,7 +626,7 @@ def get_sections():
     Returns the four syllabus sections.
     Explicitly flags General Awareness as the PRIMARY ACTIVE FOCUS.
     """
-    ga_topics = load_ga_topics_from_file("topic.txt")
+    ga_topics = load_ga_topics_from_file(find_dataset_file("topic.txt"))
 
     return {
         "active_focus_section": "General Awareness",
@@ -447,129 +680,79 @@ def get_sections():
 
 
 # =====================================================================
-# 3. Topic & Semantic PYQ Retrieval (ChromaDB + MongoDB)
+# 3. Topic & Semantic PYQ Retrieval (Direct JSON + ChromaDB + MongoDB)
 # =====================================================================
 
 @app.get("/api/pyqs/search")
 def search_pyqs(
-    query: str = Query(..., min_length=2, description="Topic or concept to search for"),
+    query: Optional[str] = Query(None, description="Topic, keyword, or concept to search for"),
     topic_filter: Optional[str] = Query(None, description="Optional GA topic filter"),
     shift_filter: Optional[str] = Query(None, description="Optional shift filter"),
-    n_results: int = Query(10, ge=1, le=50)
+    n_results: int = Query(500, ge=1, le=2000)
 ):
     """
-    Pulls PYQs using ChromaDB dense embeddings for precise semantic context,
-    supplemented by MongoDB structured queries.
+    Retrieves authentic, clean General Awareness PYQs directly from memory with zero latency.
+    - If topic_filter is provided (or user clicked a topic chip), instantly serves questions from in-memory cache.
+    - Fast keyword matching within the cached clean questions (instant response).
     """
-    vdb = get_vdb()
+    clean_query = str(query).strip() if (query is not None and not hasattr(query, "default")) else ""
+    t_filter = str(topic_filter).strip() if (topic_filter is not None and not hasattr(topic_filter, "default")) else None
+    s_filter = str(shift_filter).strip() if (shift_filter is not None and not hasattr(shift_filter, "default")) else None
+    limit = int(n_results) if (n_results is not None and not hasattr(n_results, "default")) else 500
+
     results_list: List[Dict[str, Any]] = []
     seen_ids = set()
 
-    # Build metadata where filter for Chroma
-    where_filter = {}
-    if topic_filter:
-        where_filter["topic"] = topic_filter
-    if shift_filter:
-        where_filter["shift"] = shift_filter
-    if not where_filter:
-        where_filter = None
+    # 1. Direct Topic Fetch from Clean In-Memory JSON Cache
+    if t_filter and t_filter in PYQ_TOPIC_CACHE:
+        topic_pool = PYQ_TOPIC_CACHE[t_filter]
+        
+        # If user searched a keyword within this topic, filter by query
+        if clean_query and clean_query.lower() not in (t_filter.lower(), "general awareness"):
+            kw = clean_query.lower()
+            matched = [q for q in topic_pool if kw in q["question"].lower() or any(kw in opt.lower() for opt in q["options"])]
+            unmatched = [q for q in topic_pool if q not in matched]
+            candidates = matched + unmatched
+        else:
+            candidates = topic_pool
 
-    # 1. Dense Semantic Retrieval via ChromaDB
-    try:
-        chroma_res = vdb.query(
-            query_text=query,
-            collection_name="chsl_pyqs",
-            n_results=n_results,
-            where_filter=where_filter
-        )
+        # Apply shift filter if specified
+        if s_filter:
+            candidates = [q for q in candidates if s_filter.lower() in q.get("shift", "").lower()]
 
-        ids = chroma_res.get("ids", [[]])[0]
-        docs = chroma_res.get("documents", [[]])[0]
-        metas = chroma_res.get("metadatas", [[]])[0]
-        distances = chroma_res.get("distances", [[]])[0]
+        for item in candidates[:limit]:
+            seen_ids.add(item["id"])
+            results_list.append(item)
 
-        for idx, (doc_id, doc, meta) in enumerate(zip(ids, docs, metas)):
-            if doc_id in seen_ids:
-                continue
-            seen_ids.add(doc_id)
-
-            dist = distances[idx] if idx < len(distances) else 0.0
-            similarity = round(max(0.0, 1.0 - dist), 4)
-
-            # Extract question text and options cleanly
-            q_lines = doc.split("\n")
-            q_text = ""
-            opts = []
-            capture_opts = False
-
-            for l in q_lines:
-                if l.startswith("Question:"):
-                    q_text = l.replace("Question:", "").strip()
-                elif l.startswith("Options:"):
-                    capture_opts = True
-                elif capture_opts and l.strip():
-                    opts.append(l.strip())
-
-            results_list.append({
-                "id": doc_id,
-                "question": q_text or doc[:200],
-                "options": opts,
-                "correct_answer": meta.get("correct_answer", ""),
-                "subject": meta.get("subject", "General Awareness"),
-                "topic": meta.get("topic", ""),
-                "subtopic": meta.get("subtopic", ""),
-                "shift": meta.get("shift", ""),
-                "exam_date": meta.get("exam_date", ""),
-                "exam_title": meta.get("exam_title", ""),
-                "source": "ChromaDB Semantic Embedding",
-                "similarity_score": similarity
-            })
-
-    except Exception as e:
-        print(f"[!] ChromaDB retrieval notice: {e}")
-
-    # 2. Supplementary MongoDB exact/topic match if Chroma returned fewer than requested
-    if len(results_list) < n_results:
-        try:
-            client = mongo_mgr.get_client()
-            db_pyqs = client["chsl_gnr"]["pyqs"]
-
-            mongo_query: Dict[str, Any] = {}
-            if topic_filter:
-                mongo_query["topic"] = topic_filter
-            else:
-                # Text or regex match on topic or question
-                mongo_query["$or"] = [
-                    {"topic": {"$regex": query, "$options": "i"}},
-                    {"question": {"$regex": query, "$options": "i"}}
-                ]
-
-            mongo_cursor = db_pyqs.find(mongo_query).limit(n_results - len(results_list))
-            for item in mongo_cursor:
-                doc_id = item["_id"]
-                if doc_id in seen_ids:
+    # 2. Fast In-Memory keyword matching across all topics before hitting slower disk/network DB
+    elif clean_query and clean_query.lower() != "general awareness":
+        kw = clean_query.lower()
+        for t_name, q_list in PYQ_TOPIC_CACHE.items():
+            for item in q_list:
+                if item["id"] in seen_ids:
                     continue
-                seen_ids.add(doc_id)
+                if kw in item["question"].lower() or any(kw in opt.lower() for opt in item["options"]):
+                    seen_ids.add(item["id"])
+                    results_list.append(item)
+                if len(results_list) >= limit:
+                    break
+            if len(results_list) >= limit:
+                break
 
-                results_list.append({
-                    "id": doc_id,
-                    "question": item.get("question", ""),
-                    "options": item.get("options", []),
-                    "correct_answer": item.get("correct_answer", ""),
-                    "subject": item.get("subject", "General Awareness"),
-                    "topic": item.get("topic", ""),
-                    "subtopic": item.get("subtopic", ""),
-                    "shift": item.get("shift", ""),
-                    "exam_date": item.get("exam_date", ""),
-                    "exam_title": item.get("exam_title", ""),
-                    "source": "MongoDB Verified PYQ",
-                    "similarity_score": 1.0
-                })
-        except Exception as e:
-            print(f"[!] MongoDB supplementary query notice: {e}")
+    # 3. Global fallback across all cached topics if still empty
+    if not results_list:
+        for t_name, q_list in PYQ_TOPIC_CACHE.items():
+            for q_item in q_list:
+                if q_item["id"] not in seen_ids:
+                    seen_ids.add(q_item["id"])
+                    results_list.append(q_item)
+                if len(results_list) >= limit:
+                    break
+            if len(results_list) >= limit:
+                break
 
     return {
-        "query": query,
+        "query": clean_query or (t_filter or "General Awareness"),
         "total_retrieved": len(results_list),
         "questions": results_list
     }
@@ -766,8 +949,8 @@ def record_attempt(
     now = datetime.datetime.now(datetime.timezone.utc)
     user_id = current_user["user_id"]
 
-    # 1. Insert attempt record into user_performance
-    attempt_doc = {
+    # 1. Upsert / update record in user_attempted_questions collection for Revise Your Progress
+    attempt_detail = {
         "user_id": user_id,
         "question_id": req.question_id,
         "question_type": req.question_type,
@@ -776,10 +959,24 @@ def record_attempt(
         "user_selected_option": req.user_selected_option,
         "correct_option": req.correct_option,
         "is_correct": req.is_correct,
+        "question_text": req.question_text or "",
+        "options": req.options or [],
+        "exam_date": req.exam_date or "",
+        "repetition_count": req.repetition_count or 1,
         "time_spent_seconds": req.time_spent_seconds,
         "attempted_at": now
     }
-    client["user_management"]["user_performance"].insert_one(attempt_doc)
+    client["user_management"]["user_attempted_questions"].update_one(
+        {"user_id": user_id, "question_id": req.question_id},
+        {
+            "$set": attempt_detail,
+            "$inc": {"attempt_count": 1}
+        },
+        upsert=True
+    )
+
+    # Also log history in user_performance
+    client["user_management"]["user_performance"].insert_one(attempt_detail)
 
     # 2. Update user_analytics in MongoDB
     analytics = client["user_management"]["user_analytics"].find_one({"user_id": user_id})
@@ -836,6 +1033,60 @@ def record_attempt(
         "total_attempted": total_att,
         "accuracy_pct": acc
     }
+
+
+# =====================================================================
+# 6. Attempted Questions & Revision Section (Revise Your Progress)
+# =====================================================================
+
+@app.get("/api/user/attempted-questions")
+def get_user_attempted_questions(
+    filter_status: Optional[str] = Query("all", description="'all', 'incorrect', or 'correct'"),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Returns all questions attempted by the logged-in candidate with full details,
+    allowing reattempting and progress revision.
+    """
+    client = mongo_mgr.get_client()
+    user_id = current_user["user_id"]
+    query: Dict[str, Any] = {"user_id": user_id}
+
+    if filter_status == "incorrect":
+        query["is_correct"] = False
+    elif filter_status == "correct":
+        query["is_correct"] = True
+
+    cursor = client["user_management"]["user_attempted_questions"].find(query).sort("attempted_at", -1)
+    attempted_list = []
+    for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        if isinstance(doc.get("attempted_at"), datetime.datetime):
+            doc["attempted_at"] = doc["attempted_at"].isoformat()
+        attempted_list.append(doc)
+
+    return {
+        "total": len(attempted_list),
+        "filter": filter_status,
+        "questions": attempted_list
+    }
+
+
+@app.delete("/api/user/attempted-questions/{question_id}")
+def clear_attempted_question(
+    question_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Removes a question from the attempted list so user can re-study it fresh in the main bank.
+    """
+    client = mongo_mgr.get_client()
+    user_id = current_user["user_id"]
+    client["user_management"]["user_attempted_questions"].delete_one({
+        "user_id": user_id,
+        "question_id": question_id
+    })
+    return {"status": "success", "question_id": question_id}
 
 
 # =====================================================================

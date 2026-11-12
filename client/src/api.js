@@ -67,8 +67,8 @@ export const api = {
     return request('/sections');
   },
 
-  // PYQ Retrieval (ChromaDB + MongoDB)
-  searchPYQs: async (query, topicFilter = null, shiftFilter = null, nResults = 10) => {
+  // PYQ Retrieval (ChromaDB + MongoDB + JSON Direct)
+  searchPYQs: async (query, topicFilter = null, shiftFilter = null, nResults = 500) => {
     const params = new URLSearchParams({ query, n_results: nResults });
     if (topicFilter) params.append('topic_filter', topicFilter);
     if (shiftFilter) params.append('shift_filter', shiftFilter);
@@ -87,11 +87,21 @@ export const api = {
     });
   },
 
-  // Performance Logging (MongoDB)
+  // Performance Logging & Revision (MongoDB)
   recordAttempt: async (attemptData) => {
     return request('/user/record-attempt', {
       method: 'POST',
       body: JSON.stringify(attemptData)
+    });
+  },
+
+  getAttemptedQuestions: async (filterStatus = 'all') => {
+    return request(`/user/attempted-questions?filter_status=${filterStatus}`);
+  },
+
+  clearAttemptedQuestion: async (questionId) => {
+    return request(`/user/attempted-questions/${questionId}`, {
+      method: 'DELETE'
     });
   }
 };
