@@ -43,10 +43,53 @@ PROJECT_ROOT = BASE_DIR.parent if (BASE_DIR.parent / ".env").exists() else BASE_
 load_dotenv(PROJECT_ROOT / ".env")
 load_dotenv(BASE_DIR / ".env")
 
-# Import ChromaDB & connection components
-from embedding import VectorDBManager
+# Configuration & Constants
+# =====================================================================
+
+DEFAULT_GA_TOPICS = [
+    "History (Ancient, Medieval, Modern India)",
+    "Geography (India and World)",
+    "Polity and Constitution of India",
+    "Economics and Banking Awareness",
+    "Science (Physics, Chemistry, Biology)",
+    "Current Affairs (National and International)",
+    "Awards and Honors",
+    "Sports and Games",
+    "Books and Authors",
+    "Important Days and Events",
+    "Environment and Ecology",
+    "Inventions and Discoveries",
+    "Cultural Heritage of India",
+    "Abbreviations and Terminology"
+]
+
+def load_ga_topics_from_file(topic_file: str | Path = "topic.txt") -> List[str]:
+    """Parses topic.txt and extracts General Awareness topics without heavy extractor imports."""
+    t_path = Path(topic_file)
+    if not t_path.exists():
+        return DEFAULT_GA_TOPICS
+    try:
+        with open(t_path, "r", encoding="utf-8") as f:
+            lines = [l.strip() for l in f if l.strip()]
+        ga_topics: List[str] = []
+        in_ga = False
+        major_subjects = {"english", "general intelligence", "quantitative aptitude"}
+        for line in lines:
+            lower = line.lower()
+            if "general awareness" in lower:
+                in_ga = True
+                continue
+            if in_ga:
+                if lower in major_subjects:
+                    break
+                ga_topics.append(line)
+        return ga_topics if ga_topics else DEFAULT_GA_TOPICS
+    except Exception as e:
+        print(f"[!] Warning reading {topic_file}: {e}")
+        return DEFAULT_GA_TOPICS
+
+# Import MongoDB connection manager
 from connection import MongoDBManager
-from extractor import load_ga_topics_from_file
 
 # =====================================================================
 # Configuration & Constants
@@ -71,16 +114,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Database & Vector DB singletons
+# Database singletons
 mongo_mgr = MongoDBManager()
-vdb_mgr: Optional[VectorDBManager] = None
-
-def get_vdb() -> VectorDBManager:
-    global vdb_mgr
-    if vdb_mgr is None:
-        use_cloud = os.getenv("USE_CHROMA_CLOUD", "true").lower() in ("true", "1", "yes")
-        vdb_mgr = VectorDBManager(db_path=str(PROJECT_ROOT / "chroma_db"), use_cloud=use_cloud)
-    return vdb_mgr
 
 
 # File path resolution helper supporting client/dist/assets/ and workspace root
