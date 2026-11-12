@@ -3,7 +3,9 @@
  * Manages JWT tokens in localStorage and attaches Authorization headers.
  */
 
-const API_BASE = '/api';
+// If VITE_API_URL is set (e.g. on Vercel deployment), point to it; otherwise fallback to relative '/api' for local Vite dev proxy.
+const RAW_API_BASE = import.meta.env.VITE_API_URL || '/api';
+const API_BASE = RAW_API_BASE.replace(/\/+$/, '');
 const TOKEN_KEY = 'antigravity_token';
 
 export const getStoredToken = () => localStorage.getItem(TOKEN_KEY);
@@ -18,7 +20,8 @@ const request = async (endpoint, options = {}) => {
     ...(options.headers || {})
   };
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const response = await fetch(`${API_BASE}${cleanEndpoint}`, {
     ...options,
     headers
   });

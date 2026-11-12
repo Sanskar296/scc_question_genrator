@@ -423,7 +423,7 @@ def create_jwt_token(payload_data: dict, client_ip: str) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 def get_current_user(request: Request, authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
-    """Dependency to verify JWT token, enforce IP matching, and retrieve active user from MongoDB."""
+    """Dependency to verify JWT token and retrieve active user from MongoDB."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -434,19 +434,21 @@ def get_current_user(request: Request, authorization: Optional[str] = Header(Non
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         user_id = payload.get("user_id")
-        token_ip = payload.get("ip")
         if not user_id:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token payload invalid.")
 
-        # Strict IP validation: verify requesting IP matches token bound IP
-        current_ip = get_client_ip(request)
-        if token_ip:
-            norm_token_ip = normalize_ip(token_ip)
-            if norm_token_ip != current_ip:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail=f"Security Alert: IP address mismatch. Session is bound to IP {norm_token_ip}, but incoming request originated from {current_ip}."
-                )
+        # Optional strict IP check: only active if STRICT_IP_CHECK is explicitly enabled in env
+        strict_ip = os.getenv("STRICT_IP_CHECK", "false").lower() in ("true", "1", "yes")
+        if strict_ip:
+            token_ip = payload.get("ip")
+            current_ip = get_client_ip(request)
+            if token_ip:
+                norm_token_ip = normalize_ip(token_ip)
+                if norm_token_ip != current_ip:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail=f"Security Alert: IP address mismatch. Session is bound to IP {norm_token_ip}, but incoming request originated from {current_ip}."
+                    )
 
         client = mongo_mgr.get_client()
         user = client["user_management"]["user_profiles"].find_one({"user_id": user_id})
