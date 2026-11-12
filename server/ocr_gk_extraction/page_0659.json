@@ -1,0 +1,22 @@
+{
+  "page_number": 659,
+  "relative_headings": [
+    "Sports",
+    "something that has two parts)",
+    "expressible in multiples of 2}",
+    "MB = 1000 KB",
+    "A gigabyte refers to 1000",
+    "megabytes",
+    "1 GB = 1000 MB",
+    "cangigan",
+    "material like silicon.",
+    "modified to give it electronic",
+    "called Integrated Circuits (IC)"
+  ],
+  "corresponding_topics": [
+    "Sports and Games",
+    "History (Ancient, Medieval, Modern India)",
+    "Science (Physics, Chemistry, Biology)"
+  ],
+  "text": "Computer 651\nItis difficult to talk alwaysin termsof currentsand voltages to represent\ninformation: Therefore, computer scientists use a special convention_\nhigh is symbolically represented by a 1' and a low i9 represtnted by\n'0' The Is and Os are known as binary digits, Or in short 'bity' (the term\n'binary' refers to something that has two parts)\nComputers always work with bits They do not understand any other\nform_\nComputer scientists use combinationofsbitstaken together to represent\nvarious symbols_\nBecause every bit can take one of 2 possible values, the total number\nof combinations possible, using $ bits, the computer can represent 256\ndifferent symbols\nThis is enough to cover our entire range of alphabets, numbers and\nother special characters like $, @, {etc Such a combination of 8 bits\nis called byte\nTo build   complex information like  paragraphs and mathematical\nequations, we would need a larger number of bytes or characters Thus\nwe have the kilobyte, megabyte and gigabyte:\nkilobyte = 1024 bytes\nIn computers information is represented using multiples of 8 (2') bits\nsince 8 bits are the smallest unit of information Therefore, higher units\nare expressible in multiples of 2}\nThe power of two closest to a kilo (1OOO) is 2\"0 = 1024.\nMegabytes is used ina more conventional sense and is equal to 1 million\nbytes or 1000 kilobytes_\nMB = 1000 KB\nA gigabyte refers to 1000 megabytes Or million kilobytes:\n1 GB = 1000 MB could\nThe earliest computers were designed s0 that there components\nwork with 8 bits at a time: contemporary\nWhile the  earliest machine were 8-bit   machines, This is called the\ncomputers can work with 16, 32 and even 64 bits_\ndata width of the computer: that signal a or a 0 are called\nThe basic elements of computers cangigan either be a '0' Or a 1',\nflip-flops It is a simple elecoricarceevics eitheran eard oroutward.\nwhich means that the flow of current\nModern computers use a very tiny set of flip-flops known as a register; registers is that the binary\nThe most important characteristic of these\ndigits can be stored in them using certain voltages_ small piece of a\nThe entire independent circuits can be designed on\nsemi conductor material like silicon. and is a pOOr conductor of electricity But,\nSilicon is obtained from sand and the enterior of a silicon 'chip are\nby chemical processes, the surface capabilities. Such miniature circuits are\nmodified to give it electronic\ncalled Integrated Circuits (IC)"
+}

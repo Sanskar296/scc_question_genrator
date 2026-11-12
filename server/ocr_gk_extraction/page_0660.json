@@ -1,0 +1,16 @@
+{
+  "page_number": 660,
+  "relative_headings": [
+    "Sports",
+    "operations using the binary number",
+    "NOT",
+    "(a) ALU () CU",
+    "working of the CPU: It",
+    "matlmnatical",
+    "using"
+  ],
+  "corresponding_topics": [
+    "Sports and Games"
+  ],
+  "text": "652 Lucent' $ Gvneral Knowledlg\"\"\nBy 1971, engineers were able to put few compneni\nnecessary to build a complete compuler On a single chip of silicom, \":\ntiny silicon chip was called the microprocessor:\nBecause the computer is a binary machine, it performs matlmnatical\noperations using the binary number system.\nThe binary number system is similar t0 the decimal system where: we:\nuse ten digits, 0,1,2,3_ 8,9 to represent all numerical values Thc only\ndifference is in the number of digits used.\nThe computer converts all decimal numbers into binary numbers\ncombinationsofbits. Thenby acting upon individualbits;itcan perforin\nthe required mathematical operation addition, subtraction, etc.\nThe internal circuits that can perform mathematical operations on bits\nare usually madeoftwoor more logic gates: Logic gates are components\nthat generate a 1 or a 0 depending on the input:\nThe three basic logic gates are AND, OR and NOT:\nA computer is organized into three basic units\nthe Central Processing Unit (CPU)\n(ii) the Memory Unit (MU) and\n(iii) the Input Output Unit\nCentral Processing Unit (CPU)\nThe CPU is the part of a computer that performs the main function of\ninformation processing: The memory unit stores data The computer\nsupplies processed information back to the users using special output\ndevices\nThe Central Processing Unit or CPU, is the most important part of the\ncomputer: Itis called the brain of the computer: It makes all the required\ncalculations and processes data:\nThe CPU can be divided into three main components (a) ALU () CU\nand (c) Registers\n(a) The Arithmetic and Logic Unit (ALU) ALU performs all the\nmathematical and logical operations on the information supplied\nto the CPU.\n(b) Control Unit (CU) This unit directs the working of the CPU: It\nfetches instructions (Programs) from the memory and according\nto the instructions, controls the flow of data between the ALU and\nother parts of the computer\nRegisters Registers are storage locations that hold instructions or\ndata while the CPU is using them: The registers consist of flip-flops\nand the registers used by the CPU are thegfastest memory elements\nin the computer: In contrast; the memory unit holds instructions\nand data before or after the CPU processes these\nMain attributes of CPU\n(a) Data Width It refers to the number of bits of data that can be\nmanipulated within the CPU at one given time\nThe data width of a computer is also called its word size."
+}
