@@ -118,12 +118,13 @@ app.add_middleware(
 mongo_mgr = MongoDBManager()
 
 
-# File path resolution helper supporting client/dist/assets/ and workspace root
+# File path resolution helper supporting local server root, client/dist/assets/, and workspace root
 def find_dataset_file(filename_or_subpath: str) -> Path:
     candidates = [
+        BASE_DIR / filename_or_subpath,
+        PROJECT_ROOT / "server" / filename_or_subpath,
         PROJECT_ROOT / "client" / "dist" / "assets" / filename_or_subpath,
         PROJECT_ROOT / filename_or_subpath,
-        BASE_DIR / filename_or_subpath,
         Path("client/dist/assets") / filename_or_subpath,
         Path(filename_or_subpath),
         Path("client/public/assets") / filename_or_subpath,
@@ -131,7 +132,7 @@ def find_dataset_file(filename_or_subpath: str) -> Path:
     for p in candidates:
         if p.exists():
             return p
-    return PROJECT_ROOT / filename_or_subpath
+    return BASE_DIR / filename_or_subpath
 
 # Cache Lucent GK JSON pages in memory for fast lookup
 LUCENT_PAGES_CACHE: Dict[int, Dict[str, Any]] = {}
